@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #585858; /* Made background darker */
+        }
+
+        .chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 80vmin;
+            height: 80vmin;
+            border: 2px solid #333;
+            margin: 5vmin;
+            transition: transform 0.5s ease;
+            position: relative; /* Added to maintain the undo button's position */
+        }
+
+        .chessboard.black-turn {
+            transform: rotate(180deg);
+        }
+
+        .chessboard div {
+            width: 10vmin;
+            height: 10vmin;
+            position: relative;
+        }
+
+        .chessboard.black-turn div > * {
+            transform: rotate(180deg);
+        }
+
+        .chessboard div:nth-of-type(odd) {
+            background-color: #fff;
+        }
+
+        .chessboard div:nth-of-type(even) {
+            background-color: #000;
+        }
+
+        .chessboard span {
+            position: absolute;
+            color: black;
+            font-size: 2em;
+        }
+
+        .chessboard span.row-label {
+            transform: translate(-1.5em, 0.5em);
+        }
+
+        .chessboard span.column-label {
+            bottom: 0;
+            transform: translateY(1.5em);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .chessboard.black-turn span.row-label {
+            transform: translate(-1.5em, 0.5em) rotate(180deg);
+        }
+        .chessboard.black-turn span.column-label {
+            transform: translateY(1.5em) rotate(180deg);
+        }
+
+        .chessboard img.white-piece {
+            filter: invert(100%);
+        }
+
+        .chessboard img {
+            transition: filter 0.3s ease; /* Added transition for filter effect */
+        }
+
+        .chessboard img.dragging {
+            filter: brightness(80%); /* General dragging effect */
+        }
+
+        .chessboard img.white-piece.dragging {
+            filter: invert(100%); 
+        }
+
+        .captured-pieces {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            max-width: 8.82vmin; /* Adjusted size to be smaller */
+            height: auto;
+        }
+
+        .captured-pieces img {
+            width: 2.94vmin; /* Adjusted size to be smaller */
+            height: 2.94vmin; /* Adjusted size to be smaller */
+            filter: invert(0%); /* Corrected color visibility inversion */
+        }
+
+        .captured-pieces.black {
+            align-self: flex-start;
+            filter: invert(0%); /* Corrected black pieces visibility inversion */
+        }
+
+        .captured-pieces.white {
+            align-self: flex-end;
+            filter: invert(100%); /* Corrected white pieces visibility inversion */
+        }
+
+        .undo-button, .redo-button {
+            position: fixed; /* Changed from absolute to fixed to keep it in the upper right corner */
+            top: 20px; /* Adjusted position to be consistently at the top */
+            right: 20px; /* Adjusted for redo button */
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff; /* Changed to flat blue */
+            color: white; /* Changed text color to white */
+            border: none; /* Removed border for a flat look */
+            border-radius: 20px; /* Very rounded corners */
+            box-shadow: none; /* Removed any box-shadow for a flat look */
+            z-index: 10; /* Ensure it's above all other elements */
+            transform: none !important; /* Added to prevent the undo button from moving with the chessboard rotation */
+        }
+        .redo-button {
+            margin-right: 5px;
+            right: 100px; /* Adjusted position to not overlap undo button */
+        }
+
+        /* Added styles for the turn indicator */
+        .turn-indicator {
+            position: fixed; /* Positioned directly below the undo and redo buttons */
+            top: 70px; /* Adjusted top position to place it below the buttons */
+            right: 20px; /* Aligned with the right edge of the buttons */
+            font-family: 'Courier New', Courier, monospace; /* Cool font for the turn indicator */
+            color: #fff; /* White color for better visibility */
+            font-size: 20px; /* Larger font size for readability */
+            text-align: center; /* Center the text */
+        }
+    </style>
+</head>
+
+<body>
+    <button class="undo-button" onclick="undoMove()">Undo</button>
+    <button class="redo-button" onclick="redoMove()">Redo</button>
+    <div class="turn-indicator" id="turnIndicator">White's Turn</div> <!-- Added turn indicator -->
+    <div class="captured-pieces black"></div>
+    <div class="container">
+        <div class="chessboard">
+            <script>
+                let moveHistory = [];
+                let redoStack = []; // Added for redo functionality
+
+                function createChessBoard() {
+                    const chessboard = document.querySelector('.chessboard');
+                    const initialBoardSetup = (() => {
+                        const emptyRow = Array(8).fill(null);
+                        const pawnRow = (color) => Array(8).fill({ type: 'pawn', color, hasMoved: false });
+                        const backRow = (color) => ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'].map(type => ({ type, color }));
+
+                        return [
+                            backRow('black'),
+                            pawnRow('black'),
+                            ...Array(4).fill(emptyRow),
+                            pawnRow('white'),
+                            backRow('white')
+                        ];
+                    })();
+
+                    for (let i = 0; i < 64; i++) {
+                        const square = document.createElement('div');
+                        square.id = i;
+                        let row = Math.floor(i / 8);
+                        let column = 7 - (i % 8); // Adjusted to reflect hgfedcba order
+                        let pieceInfo = initialBoardSetup[row][column];
+                        let piece = pieceInfo ? pieceInfo.type : '';
+                        let color = pieceInfo ? pieceInfo.color : '';
+                        let hasMoved = pieceInfo ? pieceInfo.hasMoved : false;
+                        if (i % 8 === 0) {
+                            const label = document.createElement('span');
+                            label.classList.add('row-label');
+                            label.textContent = (row + 1).toString();
+                            square.appendChild(label);
+                        }
+                        if (row === 7) {
+                            const label = document.createElement('span');
+                            label.classList.add('column-label');
+                            label.textContent = String.fromCharCode(104 - (i % 8)); // Adjusted to reflect hgfedcba order
+                            square.appendChild(label);
+                        }
+                        if ((row % 2 === 0 && i % 2 === 0) || (row % 2 !== 0 && i % 2 !== 0)) {
+                            square.style.backgroundColor = '#f0d9b5';
+                        } else {
+                            square.style.backgroundColor = '#b58863';
+                        }
+                        if (piece) {
+                            const img = document.createElement('img');
+                            img.src = `icons/chess-${piece}.svg`;
+                            img.style.width = '50%';
+                            img.style.height = '50%';
+                            img.style.padding = '25%';
+                            img.classList.add(color + '-piece');
+                            img.draggable = true;
+                            img.addEventListener('dragstart', function(e) {
+                                this.classList.add('dragging');
+                                dragStart.bind(this, hasMoved, row, color, e)();
+                            });
+                            img.addEventListener('dragend', function(e) {
+                                this.classList.remove('dragging');
+                                dragEnd(e);
+                            });
+                            square.appendChild(img);
+                        }
+                        square.addEventListener('dragover', dragOver);
+                        square.addEventListener('dragenter', dragEnter);
+                        square.addEventListener('dragleave', dragLeave);
+                        square.addEventListener('drop', dragDrop.bind(square, color, i));
+                        chessboard.appendChild(square);
+                    }
+                    updateDraggablePieces(); // Call this function to set the initial draggable pieces
+                    updateTurnIndicator(); // Update the turn indicator on board creation
+                }
+
+                let selectedPiece = null;
+                let turn = 'white'; // White moves first
+
+                function dragStart(hasMoved, row, color, e) {
+                    if (turn === color) { // Ensure the piece belongs to the current turn
+                        selectedPiece = { element: e.target, initialPosition: e.target.parentElement.id }; // Store the initial position
+                        setTimeout(() => (selectedPiece.element.style.display = 'none'), 0);
+                    }
+                }
+
+                function dragEnd(e) {
+                    if (selectedPiece) {
+                        selectedPiece.element.style.display = 'block';
+                        selectedPiece = null;
+                    }
+                }
+
+                function dragOver(e) {
+                    e.preventDefault();
+                }
+
+                function dragEnter(e) {
+                    e.preventDefault();
+                }
+
+                function dragLeave(e) {
+                }
+
+                function dragDrop(color, squareId, e) {
+                    e.preventDefault(); // Prevent default to allow drop
+                    if (selectedPiece) {
+                        const targetPiece = this.querySelector('img');
+                        // Check if the target square already has a piece of the same color
+                        if (targetPiece && targetPiece.classList.contains(turn + '-piece')) {
+                            // Reject the drop if the square already has a piece of the same color
+                            selectedPiece.element.style.display = 'block'; // Show the piece again
+                            return; // Exit the function without making a move
+                        }
+                        // Proceed with the move if the square does not have a piece of the same color
+                        let captured = false;
+                        if (targetPiece && targetPiece.classList.contains('white-piece') && selectedPiece.element.classList.contains('black-piece')) {
+                            document.querySelector('.captured-pieces.white').appendChild(targetPiece);
+                            captured = true;
+                        } else if (targetPiece && targetPiece.classList.contains('black-piece') && selectedPiece.element.classList.contains('white-piece')) {
+                            document.querySelector('.captured-pieces.black').appendChild(targetPiece);
+                            captured = true;
+                        }
+                        this.appendChild(selectedPiece.element); // Move the piece to the new square
+                        moveHistory.push({piece: selectedPiece.element, from: selectedPiece.initialPosition, to: squareId, captured: captured ? targetPiece : null});
+                        redoStack = []; // Clear redo stack on new move
+                        toggleTurn(); // Switch turns
+                        updateTurnIndicator(); // Update the turn indicator after each move
+                    }
+                }
+
+                function toggleTurn() {
+                    turn = turn === 'white' ? 'black' : 'white';
+                    updateDraggablePieces(); // Update draggable pieces based on the turn
+                    if (turn === 'black') {
+                        document.querySelector('.chessboard').classList.add('black-turn');
+                    } else {
+                        document.querySelector('.chessboard').classList.remove('black-turn');
+                    }
+                }
+
+                function updateDraggablePieces() {
+                    document.querySelectorAll('.chessboard img').forEach(img => {
+                        img.draggable = img.classList.contains(turn + '-piece');
+                    });
+                }
+
+                function updateTurnIndicator() {
+                    const turnIndicator = document.getElementById('turnIndicator');
+                    turnIndicator.textContent = `${turn.charAt(0).toUpperCase() + turn.slice(1)}'s Turn`; // Update the text to indicate whose turn it is
+                }
+
+                function undoMove() {
+                    if (moveHistory.length > 0) {
+                        const lastMove = moveHistory.pop();
+                        redoStack.push(lastMove); // Add to redo stack
+                        const fromSquare = document.getElementById(lastMove.from);
+                        fromSquare.appendChild(lastMove.piece); // Move the piece back to its original position
+                        if (lastMove.captured) {
+                            const toSquare = document.getElementById(lastMove.to);
+                            toSquare.appendChild(lastMove.captured); // Return the captured piece to its new position
+                        }
+                        toggleTurn(); // Switch turns back
+                        updateTurnIndicator(); // Update the turn indicator after undoing a move
+                    }
+                }
+
+                function redoMove() { // Added redo function
+                    if (redoStack.length > 0) {
+                        const lastMove = redoStack.pop();
+                        moveHistory.push(lastMove); // Add back to move history
+                        const toSquare = document.getElementById(lastMove.to);
+                        toSquare.appendChild(lastMove.piece); // Move the piece to its redo position
+                        if (lastMove.captured) {
+                            const capturedPiecesContainer = lastMove.piece.classList.contains('white-piece') ? '.captured-pieces.black' : '.captured-pieces.white';
+                            document.querySelector(capturedPiecesContainer).appendChild(lastMove.captured); // Remove the captured piece from the board
+                        }
+                        toggleTurn(); // Switch turns
+                        updateTurnIndicator(); // Update the turn indicator after redoing a move
+                    }
+                }
+
+                createChessBoard(); // Initialize the chessboard
+            </script>
+        </div>
+    </div>
+    <div class="captured-pieces white"></div>
+</body>
+
+</html>
